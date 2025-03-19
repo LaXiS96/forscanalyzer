@@ -1,14 +1,28 @@
-import Chart from 'chart.js/auto';
+import Chart, { ChartType, Tooltip, TooltipPositionerFunction } from 'chart.js/auto';
 import zoomPlugin from 'chartjs-plugin-zoom';
 
 Chart.register(zoomPlugin);
 
-const chart: HTMLCanvasElement = document.getElementById('chart');
+declare module 'chart.js' {
+  interface TooltipPositionerMap {
+    fixed: TooltipPositionerFunction<ChartType>;
+  }
+}
+Tooltip.positioners.fixed = (items, eventPosition) => ({
+  x: eventPosition.x,
+  y: chart?.height ?? 0,
+  yAlign: 'top',
+});
 
-const input: HTMLInputElement = document.getElementById('input');
-input.onchange = () => {
-  console.debug('input.onchange', input);
-  const file = input.files[0];
+const fileInput: HTMLInputElement = document.getElementById('input');
+const resetZoomButton: HTMLButtonElement = document.getElementById('reset-zoom');
+const chartCanvas: HTMLCanvasElement = document.getElementById('chart');
+
+let chart: Chart | undefined;
+
+fileInput.onchange = () => {
+  console.debug('input.onchange', fileInput);
+  const file = fileInput.files[0];
   const reader = new FileReader();
   reader.onload = () => {
     const parsed = parseCsv(reader.result);
@@ -17,7 +31,9 @@ input.onchange = () => {
   reader.readAsText(file);
 };
 
-function parseCsv(input: string): { [key: string]: number[]; } {
+resetZoomButton.onclick = () => chart?.resetZoom();
+
+function parseCsv(input: string): Record<string, number[]> {
   const t1 = window.performance.now();
   let offset = 0; // Input string offset
 
@@ -47,7 +63,7 @@ function parseCsv(input: string): { [key: string]: number[]; } {
   return result;
 }
 
-function drawChart(input: { [key: string]: number[]; }) {
+function drawChart(input: Record<string, number[]>) {
   const data = {
     datasets: Object.entries(input)
       .filter(([key, _]) => key !== 'time(ms)')
@@ -62,7 +78,10 @@ function drawChart(input: { [key: string]: number[]; }) {
   };
   console.debug('drawChart data', data);
 
-  new Chart(chart, {
+  if (chart)
+    chart.destroy();
+
+  chart = new Chart(chartCanvas, {
     type: 'line',
     data,
     options: {
@@ -75,12 +94,16 @@ function drawChart(input: { [key: string]: number[]; }) {
       normalized: true,
       spanGaps: true,
       scales: {
-        x: { type: 'linear' }
+        x: {
+          type: 'linear',
+          title: { display: true, text: 'seconds' }
+        }
       },
       animation: false,
       interaction: { mode: 'nearest', axis: 'x', intersect: false },
       plugins: {
         legend: { position: 'right' },
+        tooltip: { position: 'fixed' },
         decimation: { enabled: true, algorithm: 'min-max' },
         zoom: {
           zoom: { wheel: { enabled: true }, mode: 'x' },
