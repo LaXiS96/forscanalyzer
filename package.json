@@ -1,0 +1,18 @@
+{
+  "name": "forscanalyzer",
+  "source": "index.html",
+  "scripts": {
+    "start": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "chart.js": "4.4.8",
+    "chartjs-plugin-zoom": "2.2.0"
+  },
+  "devDependencies": {
+    "typescript": "5.8.2",
+    "vite": "6.2.2"
+  }
+}
