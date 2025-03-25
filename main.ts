@@ -15,23 +15,36 @@ Tooltip.positioners.fixed = (items, eventPosition) => ({
 });
 
 const fileInput: HTMLInputElement = document.getElementById('input');
+const drawButton: HTMLButtonElement = document.getElementById('draw');
 const resetZoomButton: HTMLButtonElement = document.getElementById('reset-zoom');
 const chartCanvas: HTMLCanvasElement = document.getElementById('chart');
+const combosDiv: HTMLDivElement = document.getElementById('combos');
 
+const dataTypes = ['number', 'string'];
+const scales = ['y1', 'y2', 'y3'];
+let parsed: Record<string, number[]> | undefined;
 let chart: Chart | undefined;
 
-fileInput.onchange = () => {
-  console.debug('input.onchange', fileInput);
-  const file = fileInput.files[0];
-  const reader = new FileReader();
-  reader.onload = () => {
-    const parsed = parseCsv(reader.result);
+drawButton.onclick = () => {
+  if (parsed)
     drawChart(parsed);
-  };
-  reader.readAsText(file);
 };
 
 resetZoomButton.onclick = () => chart?.resetZoom();
+
+fileInput.onchange = () => {
+  console.debug('input.onchange', fileInput);
+  const file = fileInput.files?.[0];
+  if (!file)
+    return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    parsed = parseCsv(reader.result);
+    populateCombos(parsed);
+  };
+  reader.readAsText(file);
+};
 
 function parseCsv(input: string): Record<string, number[]> {
   const t1 = window.performance.now();
@@ -63,7 +76,48 @@ function parseCsv(input: string): Record<string, number[]> {
   return result;
 }
 
+function populateCombos(input: Record<string, number[]>) {
+  combosDiv.innerHTML = '';
+  for (const key of Object.keys(input)) {
+    const text = document.createTextNode(key + ' ');
+
+    // const selectType = document.createElement('select');
+    // for (const type of dataTypes) {
+    //   const option = document.createElement('option');
+    //   option.innerText = type;
+    //   option.value = type;
+    //   selectType.append(option);
+    // }
+
+    const selectScale = document.createElement('select');
+    selectScale.classList.add('select-scale');
+    for (const scale of scales) {
+      const option = document.createElement('option');
+      option.innerText = scale;
+      option.value = scale;
+      selectScale.append(option);
+    }
+
+    const div = document.createElement('div');
+    div.setAttribute('data-header', key);
+    div.append(text, /* selectType, */ selectScale);
+    combosDiv.append(div);
+  }
+}
+
 function drawChart(input: Record<string, number[]>) {
+  // TODO should remove time dataset from headers/scales
+  const headers = Object.fromEntries([...document.getElementsByClassName('select-scale')]
+    .map(e => [e.parentElement?.getAttribute('data-header'), (e as HTMLSelectElement).value]));
+  console.debug('headers', headers);
+
+  const scales = Object.fromEntries([...new Set(Object.values(headers)).values()]
+    .map(y => [y, {
+      type: 'linear',
+      title: { display: true, text: y }
+    }]));
+  console.debug('scales', scales);
+
   const data = {
     datasets: Object.entries(input)
       .filter(([key, _]) => key !== 'time(ms)')
@@ -73,6 +127,7 @@ function drawChart(input: Record<string, number[]>) {
           x: (input['time(ms)'][i] || 0) / 1000,
           y: v || 0
         })),
+        yAxisID: headers[key],
         hidden: true,
       })),
   };
@@ -97,7 +152,8 @@ function drawChart(input: Record<string, number[]>) {
         x: {
           type: 'linear',
           title: { display: true, text: 'seconds' }
-        }
+        },
+        ...scales
       },
       animation: false,
       interaction: { mode: 'nearest', axis: 'x', intersect: false },
