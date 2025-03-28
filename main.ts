@@ -9,10 +9,11 @@ declare module 'chart.js' {
   }
 }
 Tooltip.positioners.fixed = (items, eventPosition) => ({
-  x: eventPosition.x,
-  y: chart?.height ?? 0,
-  yAlign: 'top',
+  // x: eventPosition.x, y: chart?.height ?? 0, xAlign: 'left',
+  x: Math.abs((chart?.width ?? 0) - 150), y: 0, xAlign: 'left'
 });
+
+type Serie<T> = { header: string, values: T[] };
 
 const fileInput: HTMLInputElement = document.getElementById('input');
 const drawButton: HTMLButtonElement = document.getElementById('draw');
@@ -22,12 +23,12 @@ const combosDiv: HTMLDivElement = document.getElementById('combos');
 
 const dataTypes = ['number', 'string'];
 const scales = ['y1', 'y2', 'y3'];
-let parsed: Record<string, number[]> | undefined;
+let lastSeries: Serie<number>[] | undefined;
 let chart: Chart | undefined;
 
 drawButton.onclick = () => {
-  if (parsed)
-    drawChart(parsed);
+  if (lastSeries)
+    drawChart(lastSeries);
 };
 
 resetZoomButton.onclick = () => chart?.resetZoom();
@@ -40,34 +41,34 @@ fileInput.onchange = () => {
 
   const reader = new FileReader();
   reader.onload = () => {
-    parsed = parseCsv(reader.result);
-    populateCombos(parsed);
+    if (typeof reader.result !== 'string')
+      throw new Error('FileReader result is not a string');
+
+    const parsedSeries = parseCsv(reader.result);
+    lastSeries = transformData(parsedSeries);
+    populateCombos(lastSeries);
   };
   reader.readAsText(file);
 };
 
-function parseCsv(input: string): Record<string, number[]> {
+function parseCsv(input: string): Serie<unknown>[] {
   const t1 = window.performance.now();
-  let offset = 0; // Input string offset
+  let offset = 0;
 
-  const end = input.indexOf('\r\n', offset);
-  const headers = input.substring(offset, end).split(';');
-  offset = end + 2;
-
-  const data: number[][] = [];
-  let index = 0; // Data array value index
+  const data: unknown[][] = [];
+  let row = 0;
   while (offset < input.length) {
     const end = input.indexOf('\r\n', offset);
     const split = input.substring(offset, end).split(';');
-    split.forEach((v, i) => {
-      data[i] ??= [];
-      data[i][index] = Number(v);
+    split.forEach((v, col) => {
+      data[col] ??= [];
+      data[col][row] = v;
     });
     offset = end + 2;
-    index++;
+    row++;
   }
 
-  const result = Object.fromEntries(headers.map((h, i) => [h, data[i]]));
+  const result = data.map(values => ({ header: String(values.shift()), values }));
   console.log('result', result);
 
   const t2 = window.performance.now();
@@ -76,10 +77,48 @@ function parseCsv(input: string): Record<string, number[]> {
   return result;
 }
 
-function populateCombos(input: Record<string, number[]>) {
+function transformData(series: Serie<unknown>[]): Serie<number>[] {
+  return series
+    .map(s => ({
+      header: s.header,
+      values: s.values.map(v => {
+        switch (s.header) {
+          case 'time(ms)':
+            return Number(v) / 1000;
+          case 'COMP_BPV': switch (v) {
+            case 'OFF': return 0; // OFF = closed = small turbo not bypassed
+            case 'ON': return 100; // ON = open = small turbo bypassed
+            default: return -1;
+          }
+          case 'M_GEAR': switch (v) {
+            case 'Neutral': return 0;
+            case '1st gear': return 1;
+            case '2nd gear': return 2;
+            case '3rd gear': return 3;
+            case '4th gear': return 4;
+            case '5th gear': return 5;
+            case '6th gear': return 6;
+            default: return -1;
+          }
+          case 'EGR_ERR#1(%)':
+            const n = Number(v);
+            return (n === 99.22) ? 0 : n; // Value is fixed at 99.22 when commanded EGR is 0
+          default:
+            return Number(v);
+        }
+      }),
+    }))
+    .sort((a, b) => (a.header > b.header) ? +1
+      : (a.header < b.header) ? -1
+        : 0);
+}
+
+function populateCombos(series: Serie<unknown>[]): void {
   combosDiv.innerHTML = '';
-  for (const key of Object.keys(input)) {
-    const text = document.createTextNode(key + ' ');
+
+  const headers = series.map(s => s.header).filter(h => h !== 'time(ms)');
+  for (const header of headers) {
+    const text = document.createTextNode(header + ' ');
 
     // const selectType = document.createElement('select');
     // for (const type of dataTypes) {
@@ -99,14 +138,14 @@ function populateCombos(input: Record<string, number[]>) {
     }
 
     const div = document.createElement('div');
-    div.setAttribute('data-header', key);
+    div.setAttribute('data-header', header);
     div.append(text, /* selectType, */ selectScale);
     combosDiv.append(div);
   }
 }
 
-function drawChart(input: Record<string, number[]>) {
-  // TODO should remove time dataset from headers/scales
+function drawChart(series: Serie<number>[]) {
+  // TODO combos aren't consistent when columns with the same name exist
   const headers = Object.fromEntries([...document.getElementsByClassName('select-scale')]
     .map(e => [e.parentElement?.getAttribute('data-header'), (e as HTMLSelectElement).value]));
   console.debug('headers', headers);
@@ -118,16 +157,20 @@ function drawChart(input: Record<string, number[]>) {
     }]));
   console.debug('scales', scales);
 
+  const timeSerie = series.find(s => s.header === 'time(ms)');
+  if (timeSerie === undefined)
+    throw new Error("Could not find 'time(ms)' serie");
+
   const data = {
-    datasets: Object.entries(input)
-      .filter(([key, _]) => key !== 'time(ms)')
-      .map(([key, values]) => ({
-        label: key,
-        data: values.map((v, i) => ({
-          x: (input['time(ms)'][i] || 0) / 1000,
-          y: v || 0
+    datasets: series
+      .filter(s => s.header !== 'time(ms)')
+      .map(serie => ({
+        label: serie.header,
+        data: serie.values.map((v, i) => ({
+          x: timeSerie.values[i],
+          y: v,
         })),
-        yAxisID: headers[key],
+        yAxisID: headers[serie.header],
         hidden: true,
       })),
   };
@@ -160,7 +203,7 @@ function drawChart(input: Record<string, number[]>) {
       plugins: {
         legend: { position: 'right' },
         tooltip: { position: 'fixed' },
-        decimation: { enabled: true, algorithm: 'min-max' },
+        decimation: { enabled: true, algorithm: 'min-max', threshold: 1 },
         zoom: {
           zoom: { wheel: { enabled: true }, mode: 'x' },
           pan: { enabled: true, mode: 'x' },
