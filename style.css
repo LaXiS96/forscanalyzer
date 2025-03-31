@@ -19,7 +19,8 @@ body {
   height: 100%;
 }
 
-#combos>* {
-  display: inline-block;
-  margin-right: .5rem;
+#combos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: .25rem;
 }

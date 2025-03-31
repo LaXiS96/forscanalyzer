@@ -78,9 +78,12 @@ function parseCsv(input: string): Serie<unknown>[] {
 }
 
 function transformData(series: Serie<unknown>[]): Serie<number>[] {
+  const seenHeaders: Record<string, number> = {};
   return series
     .map(s => ({
-      header: s.header,
+      header: seenHeaders[s.header] === undefined
+        ? (seenHeaders[s.header] = 1, s.header)
+        : s.header + ' ' + ++seenHeaders[s.header],
       values: s.values.map(v => {
         switch (s.header) {
           case 'time(ms)':
@@ -118,7 +121,10 @@ function populateCombos(series: Serie<unknown>[]): void {
 
   const headers = series.map(s => s.header).filter(h => h !== 'time(ms)');
   for (const header of headers) {
-    const text = document.createTextNode(header + ' ');
+    const check = document.createElement('input');
+    check.type = 'checkbox';
+
+    const text = document.createTextNode(' ' + header + ' ');
 
     // const selectType = document.createElement('select');
     // for (const type of dataTypes) {
@@ -129,7 +135,6 @@ function populateCombos(series: Serie<unknown>[]): void {
     // }
 
     const selectScale = document.createElement('select');
-    selectScale.classList.add('select-scale');
     for (const scale of scales) {
       const option = document.createElement('option');
       option.innerText = scale;
@@ -139,18 +144,21 @@ function populateCombos(series: Serie<unknown>[]): void {
 
     const div = document.createElement('div');
     div.setAttribute('data-header', header);
-    div.append(text, /* selectType, */ selectScale);
+    div.append(check, text, /* selectType, */ selectScale);
     combosDiv.append(div);
   }
 }
 
 function drawChart(series: Serie<number>[]) {
-  // TODO combos aren't consistent when columns with the same name exist
-  const headers = Object.fromEntries([...document.getElementsByClassName('select-scale')]
-    .map(e => [e.parentElement?.getAttribute('data-header'), (e as HTMLSelectElement).value]));
-  console.debug('headers', headers);
+  const combos = Object.fromEntries([...combosDiv.children].map(e => [
+    e.getAttribute('data-header')!,
+    {
+      enabled: (e.querySelector('input[type=checkbox]') as HTMLInputElement).checked,
+      scale: (e.querySelector('select') as HTMLSelectElement).value,
+    }]));
+  console.debug('combos', combos);
 
-  const scales = Object.fromEntries([...new Set(Object.values(headers)).values()]
+  const scales = Object.fromEntries([...new Set(Object.values(combos).map(c => c.scale)).values()]
     .map(y => [y, {
       type: 'linear',
       title: { display: true, text: y }
@@ -163,14 +171,14 @@ function drawChart(series: Serie<number>[]) {
 
   const data = {
     datasets: series
-      .filter(s => s.header !== 'time(ms)')
+      .filter(serie => serie.header !== 'time(ms)' && combos[serie.header].enabled)
       .map(serie => ({
         label: serie.header,
         data: serie.values.map((v, i) => ({
           x: timeSerie.values[i],
           y: v,
         })),
-        yAxisID: headers[serie.header],
+        yAxisID: combos[serie.header].scale,
         hidden: true,
       })),
   };
